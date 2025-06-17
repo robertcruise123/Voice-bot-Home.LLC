@@ -1,8 +1,8 @@
 streamlit==1.45.1
-SpeechRecognition==3.14.3
+SpeechRecognition
 numpy==1.26.4
-together==2.3.0
+together==1.5.15
 gTTS==2.5.4
 soundfile==0.12.1
-scikit-learn==1.5.2
-pandas==2.2.3
+scikit-learn==1.3.2
+pandas==2.0.3
