@@ -99,29 +99,57 @@ def transcribe_audio(audio_file):
         return ""
     
     r = sr.Recognizer()
-    r.energy_threshold = 300  # Adjust for noise
+    r.energy_threshold = 300
     r.dynamic_energy_threshold = True
     
     try:
-        st.info("🎯 Transcribing your question...")
+        st.info("🎯 Processing and transcribing your audio...")
         
-        # Handle UploadedFile object from st.audio_input
-        if hasattr(audio_file, 'read'):
-            # It's an UploadedFile object, read the bytes
-            audio_bytes = audio_file.read()
-            audio_file.seek(0)  # Reset file pointer
-        else:
-            # It's already bytes
-            audio_bytes = audio_file
+        # Create a temporary file to handle the audio
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
+            # Write the uploaded file content to temp file
+            audio_file.seek(0)  # Reset to beginning
+            temp_file.write(audio_file.read())
+            temp_file_path = temp_file.name
         
-        # Convert audio bytes to AudioFile
-        with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
-            # Adjust for ambient noise
-            r.adjust_for_ambient_noise(source, duration=0.5)
-            audio = r.record(source)
+        # Convert audio to proper format using soundfile
+        try:
+            # Read the audio file
+            data, samplerate = sf.read(temp_file_path)
+            
+            # Convert to WAV format that speech_recognition can handle
+            wav_path = temp_file_path.replace('.wav', '_converted.wav')
+            sf.write(wav_path, data, samplerate, format='WAV', subtype='PCM_16')
+            
+            # Use the converted WAV file for speech recognition
+            with sr.AudioFile(wav_path) as source:
+                r.adjust_for_ambient_noise(source, duration=0.5)
+                audio = r.record(source)
+            
+            # Clean up temp files
+            try:
+                os.unlink(temp_file_path)
+                os.unlink(wav_path)
+            except:
+                pass
+                
+        except Exception as conversion_error:
+            st.warning(f"Audio conversion issue: {conversion_error}")
+            # Fallback: try direct processing
+            try:
+                with sr.AudioFile(temp_file_path) as source:
+                    r.adjust_for_ambient_noise(source, duration=0.5)
+                    audio = r.record(source)
+                os.unlink(temp_file_path)
+            except Exception as fallback_error:
+                st.error(f"Could not process audio file: {fallback_error}")
+                try:
+                    os.unlink(temp_file_path)
+                except:
+                    pass
+                return ""
 
-        # Try multiple recognition methods
-        text = ""
+        # Try speech recognition
         try:
             text = r.recognize_google(audio, language='en-US')
             st.success("✅ Transcription successful!")
@@ -131,14 +159,7 @@ def transcribe_audio(audio_file):
             return ""
         except sr.RequestError as e:
             st.error(f"❌ Speech recognition service error: {e}")
-            # Fallback to alternative service if available
-            try:
-                text = r.recognize_sphinx(audio)
-                st.info("✅ Used offline transcription")
-                return text.strip()
-            except:
-                st.error("All transcription methods failed. Please check your internet connection.")
-                return ""
+            return ""
             
     except Exception as e:
         st.error(f"❌ Error processing audio: {str(e)}")
