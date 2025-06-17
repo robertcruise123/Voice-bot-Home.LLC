@@ -13,6 +13,12 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import json
 
+# Initialize session state first
+if "conversation" not in st.session_state:
+    st.session_state.conversation = []
+if "processing" not in st.session_state:
+    st.session_state.processing = False
+
 try:
     TOGETHER_API_KEY = st.secrets["TOGETHER_API_KEY"]
 except KeyError:
@@ -87,35 +93,54 @@ def remove_emojis(text):
     
     return emoji_pattern.sub(r'', text).strip()
 
-def record_audio():
-    st.info("Use the audio input widget below to record your question...")
-    audio_bytes = st.audio_input("Record your interview question")
-    
-    if audio_bytes:
-        st.success("Recording received!")
-        return audio_bytes
-    return None
-
 def transcribe_audio(audio_bytes):
-    r = sr.Recognizer()
-    
-    with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
-        audio = r.record(source)
-
-    try:
-        st.info("Transcribing audio...")
-        text = r.recognize_google(audio)
-        st.success("Transcription complete!")
-        return text
-    except sr.UnknownValueError:
-        st.error("Speech Recognition could not understand audio. Please try again.")
+    """Transcribe audio bytes to text using speech recognition"""
+    if not audio_bytes:
         return ""
-    except sr.RequestError as e:
-        st.error(f"Could not request results from Google Web Speech API service; check your internet connection: {e}")
+    
+    r = sr.Recognizer()
+    r.energy_threshold = 300  # Adjust for noise
+    r.dynamic_energy_threshold = True
+    
+    try:
+        # Convert audio bytes to AudioFile
+        with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
+            # Adjust for ambient noise
+            r.adjust_for_ambient_noise(source, duration=0.5)
+            audio = r.record(source)
+
+        st.info("🎯 Transcribing your question...")
+        
+        # Try multiple recognition methods
+        text = ""
+        try:
+            text = r.recognize_google(audio, language='en-US')
+            st.success("✅ Transcription successful!")
+            return text.strip()
+        except sr.UnknownValueError:
+            st.warning("⚠️ Could not understand the audio clearly. Please try speaking louder and clearer.")
+            return ""
+        except sr.RequestError as e:
+            st.error(f"❌ Speech recognition service error: {e}")
+            # Fallback to alternative service
+            try:
+                text = r.recognize_sphinx(audio)
+                st.info("✅ Used offline transcription")
+                return text.strip()
+            except:
+                st.error("All transcription methods failed. Please check your internet connection.")
+                return ""
+            
+    except Exception as e:
+        st.error(f"❌ Error processing audio: {str(e)}")
         return ""
 
 def get_personalized_response(prompt):
-    st.info("Getting personalized response...")
+    """Generate personalized response using Together API"""
+    if not prompt.strip():
+        return "I didn't catch your question clearly. Could you please ask again?"
+    
+    st.info("🤖 Generating Ayush's response...")
     
     relevant_context = find_relevant_context(prompt)
     
@@ -143,69 +168,50 @@ def get_personalized_response(prompt):
                 {"role": "user", "content": prompt}
             ],
             max_tokens=250,
-            temperature=0.7
+            temperature=0.7,
+            timeout=30  # Add timeout
         )
-        st.success("Response generated!")
-        return response.choices[0].message.content
+        
+        response_text = response.choices[0].message.content.strip()
+        st.success("✅ Response generated!")
+        return response_text
+        
     except Exception as e:
-        st.error(f"Error communicating with Together API: {e}")
-        return "Sorry, I couldn't process that right now. Could you try asking again?"
+        st.error(f"❌ Error communicating with Together API: {e}")
+        return "Sorry, I'm having trouble processing that right now. Could you try asking your question again?"
 
 def text_to_speech(text, lang='en'):
+    """Convert text to speech and return audio file path"""
     clean_text = remove_emojis(text)
     
     if not clean_text.strip():
-        st.warning("No text content available for speech after cleaning.")
+        st.warning("⚠️ No text content available for speech.")
         return None
     
-    with st.spinner("Generating audio response..."):
-        try:
-            tts = gTTS(text=clean_text, lang=lang, slow=False)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-                tts.save(fp.name)
-                audio_file_path = fp.name
-            st.success("Audio generated!")
-            return audio_file_path
-        except Exception as e:
-            st.error(f"Error generating speech: {e}")
-            return None
-
-def process_voice_interaction():
-    audio_bytes = record_audio()
-    
-    if audio_bytes is not None:
-        transcribed_text = transcribe_audio(audio_bytes)
+    try:
+        st.info("🔊 Generating audio response...")
+        tts = gTTS(text=clean_text, lang=lang, slow=False)
         
-        if transcribed_text:
-            st.write(f"**Question:** {transcribed_text}")
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+            tts.save(fp.name)
+            audio_file_path = fp.name
             
-            ai_response = get_personalized_response(transcribed_text)
-            st.write(f"**Ayush's Answer:** {ai_response}")
-            
-            st.session_state.conversation.append({"role": "interviewer", "content": transcribed_text})
-            st.session_state.conversation.append({"role": "ayush", "content": ai_response})
-            
-            if ai_response:
-                audio_path = text_to_speech(ai_response)
-                if audio_path:
-                    st.audio(audio_path, format='audio/mp3', start_time=0, loop=False, autoplay=True)
-                    
-                    if os.path.exists(audio_path):
-                        try:
-                            os.unlink(audio_path)
-                        except:
-                            pass
-            
-            return True
-        else:
-            st.warning("No clear speech was detected. Please try speaking louder or clearer.")
-            return False
-    
-    return False
+        st.success("✅ Audio generated!")
+        return audio_file_path
+        
+    except Exception as e:
+        st.error(f"❌ Error generating speech: {e}")
+        return None
 
-st.set_page_config(page_title="Ayush's Interview Voice Bot", layout="centered")
+# Streamlit UI
+st.set_page_config(
+    page_title="Ayush's Interview Voice Bot", 
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
 
-st.title("Ayush's Interview Voice Bot")
+st.title("🎤 Ayush's Interview Voice Bot")
 st.subheader("AI Agent Position Interview - Home.LLC")
 
 st.markdown("""
@@ -215,55 +221,123 @@ This bot will answer interview questions as Ayush would, drawing from his person
 skills, and background. Perfect for practicing interview scenarios or getting to know Ayush better.
 
 **How it works:**
-1. Click "Start Interview Question" 
-2. Record your interview question using the audio input
-3. Listen to Ayush's personalized response
+1. Use the audio recorder below to ask your question
+2. Wait for transcription and response generation
+3. Listen to Ayush's personalized audio response
 """)
 
-st.info("""
-**Sample Interview Questions:**
-- What should we know about your life story?
-- What's your number one superpower?
-- What are the top 3 areas you'd like to grow in?
-- What misconceptions do your coworkers have about you?
-- How do you push your boundaries and limits?
-""")
+with st.expander("💡 Sample Interview Questions"):
+    st.markdown("""
+    - What should we know about your life story?
+    - What's your number one superpower?
+    - What are the top 3 areas you'd like to grow in?
+    - What misconceptions do your coworkers have about you?
+    - How do you push your boundaries and limits?
+    - Tell me about a challenging project you worked on?
+    """)
 
-if "conversation" not in st.session_state:
-    st.session_state.conversation = []
+# Main interview section
+st.header("🎯 Interview Session")
 
-st.header("Interview Session")
+# Audio input
+st.markdown("### Record Your Question")
+audio_bytes = st.audio_input("🎙️ Click to record your interview question")
 
-if st.button("Start Interview Question", key="interview_button", type="primary"):
-    st.markdown("---")
+# Process audio when uploaded
+if audio_bytes is not None and not st.session_state.processing:
+    st.session_state.processing = True
     
     with st.container():
-        success = process_voice_interaction()
+        st.markdown("---")
         
-        if success:
+        # Step 1: Transcribe
+        with st.spinner("Processing your audio..."):
+            transcribed_text = transcribe_audio(audio_bytes)
+        
+        if transcribed_text:
+            # Display question
+            st.markdown("### 🤔 Your Question:")
+            st.info(f'"{transcribed_text}"')
+            
+            # Step 2: Generate response
+            with st.spinner("Ayush is thinking..."):
+                ai_response = get_personalized_response(transcribed_text)
+            
+            # Display response
+            st.markdown("### 💬 Ayush's Answer:")
+            st.success(ai_response)
+            
+            # Step 3: Generate and play audio
+            if ai_response:
+                with st.spinner("Converting to speech..."):
+                    audio_path = text_to_speech(ai_response)
+                
+                if audio_path:
+                    st.markdown("### 🔊 Listen to Ayush's Response:")
+                    try:
+                        with open(audio_path, 'rb') as audio_file:
+                            audio_bytes_response = audio_file.read()
+                        st.audio(audio_bytes_response, format='audio/mp3')
+                        
+                        # Clean up temp file
+                        if os.path.exists(audio_path):
+                            try:
+                                os.unlink(audio_path)
+                            except:
+                                pass
+                    except Exception as e:
+                        st.error(f"Error playing audio: {e}")
+            
+            # Save to conversation history
+            st.session_state.conversation.append({
+                "role": "interviewer", 
+                "content": transcribed_text
+            })
+            st.session_state.conversation.append({
+                "role": "ayush", 
+                "content": ai_response
+            })
+            
             st.markdown("---")
-            st.success("Interview question completed successfully!")
+            st.success("✅ Interview question completed! Record another question above.")
+            
         else:
-            st.error("Please try again with a clearer question.")
+            st.warning("⚠️ Could not transcribe your audio. Please try again with clearer speech.")
+    
+    st.session_state.processing = False
 
+# Sidebar - Interview History
 if st.session_state.conversation:
-    st.sidebar.header("Interview History")
+    st.sidebar.header("📝 Interview History")
     
-    for i, entry in enumerate(reversed(st.session_state.conversation)):
-        if entry["role"] == "interviewer":
-            st.sidebar.markdown(f"**Q{len(st.session_state.conversation)//2 - i//2}:** {entry['content']}")
-        else:
-            st.sidebar.markdown(f"**Ayush:** {entry['content']}")
-        
-        if i < len(st.session_state.conversation) - 1 and entry["role"] == "interviewer":
-            st.sidebar.markdown("---")
+    # Group conversations by Q&A pairs
+    qa_pairs = []
+    for i in range(0, len(st.session_state.conversation), 2):
+        if i + 1 < len(st.session_state.conversation):
+            qa_pairs.append({
+                'question': st.session_state.conversation[i]['content'],
+                'answer': st.session_state.conversation[i + 1]['content']
+            })
     
-    if st.sidebar.button("Clear Interview History"):
+    # Display in reverse order (newest first)
+    for idx, qa in enumerate(reversed(qa_pairs)):
+        with st.sidebar.expander(f"Q{len(qa_pairs) - idx}: {qa['question'][:50]}..."):
+            st.write(f"**Q:** {qa['question']}")
+            st.write(f"**A:** {qa['answer']}")
+    
+    if st.sidebar.button("🗑️ Clear Interview History"):
         st.session_state.conversation = []
-        st.experimental_rerun()
+        st.rerun()
 
-with st.expander("View Ayush's Knowledge Base"):
+# Knowledge base viewer
+with st.expander("📚 View Ayush's Knowledge Base"):
     st.json(PERSONAL_KNOWLEDGE_BASE)
 
+# Footer
 st.markdown("---")
-st.markdown("*Ayush Sarkar - BCA Graduate - AI/ML Enthusiast - Ready for Home.LLC!*")
+st.markdown("""
+<div style='text-align: center'>
+    <p><em>Ayush Sarkar - BCA Graduate - AI/ML Enthusiast - Ready for Home.LLC!</em></p>
+    <p>🚀 Built with Streamlit • 🤖 Powered by Together AI • 🎙️ Speech Recognition</p>
+</div>
+""", unsafe_allow_html=True)
