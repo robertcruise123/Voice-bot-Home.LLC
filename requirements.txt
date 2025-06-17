@@ -1,9 +1,8 @@
-streamlit
-audio-recorder-streamlit
-SpeechRecognization
-numpy<2.1
-together
-gTTS
-soundfile
-scikit-learn<1.4
-pandas<2.1
+streamlit==1.45.1 # Pinning to a specific version for stability with other packages
+SpeechRecognition # Corrected spelling, unpinned for broader compatibility
+numpy==1.26.4 # Explicitly pinning a version compatible with Python 3.9 and scikit-learn
+together==1.5.15 # Keeping current version
+gTTS==2.5.4 # Keeping current version
+soundfile==0.12.1 # Pinning a common compatible version for Python 3.9
+scikit-learn==1.3.2 # Pinning a version compatible with numpy and Python 3.9
+pandas==2.0.3 # Pinning a common compatible version for Python 3.9 and other libs
