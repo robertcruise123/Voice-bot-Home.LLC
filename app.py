@@ -98,71 +98,107 @@ def transcribe_audio(audio_file):
     if not audio_file:
         return ""
     
-    r = sr.Recognizer()
-    r.energy_threshold = 300
-    r.dynamic_energy_threshold = True
-    
     try:
-        st.info("🎯 Processing and transcribing your audio...")
+        st.info("🎯 Processing your audio...")
         
-        # Create a temporary file to handle the audio
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
-            # Write the uploaded file content to temp file
-            audio_file.seek(0)  # Reset to beginning
-            temp_file.write(audio_file.read())
-            temp_file_path = temp_file.name
+        # Handle UploadedFile object from st.audio_input
+        if hasattr(audio_file, 'read'):
+            audio_bytes = audio_file.read()
+            audio_file.seek(0)
+        else:
+            audio_bytes = audio_file
         
-        # Convert audio to proper format using soundfile
+        # Debug info
+        st.info(f"Audio file size: {len(audio_bytes)} bytes")
+        
+        # Save to temporary file first (better compatibility)
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
+            temp_audio.write(audio_bytes)
+            temp_audio_path = temp_audio.name
+        
         try:
-            # Read the audio file
-            data, samplerate = sf.read(temp_file_path)
-            
-            # Convert to WAV format that speech_recognition can handle
-            wav_path = temp_file_path.replace('.wav', '_converted.wav')
-            sf.write(wav_path, data, samplerate, format='WAV', subtype='PCM_16')
-            
-            # Use the converted WAV file for speech recognition
-            with sr.AudioFile(wav_path) as source:
-                r.adjust_for_ambient_noise(source, duration=0.5)
-                audio = r.record(source)
-            
-            # Clean up temp files
+            # Convert using soundfile if needed
             try:
-                os.unlink(temp_file_path)
-                os.unlink(wav_path)
+                # Try to read and convert the audio
+                data, samplerate = sf.read(temp_audio_path)
+                
+                # Ensure it's mono
+                if len(data.shape) > 1:
+                    data = np.mean(data, axis=1)
+                
+                # Save as WAV for better compatibility
+                sf.write(temp_audio_path, data, samplerate)
+                st.info(f"Audio processed: {samplerate}Hz, {len(data)} samples")
+                
+            except Exception as e:
+                st.warning(f"Audio conversion warning: {e}")
+            
+            # Initialize recognizer with better settings
+            r = sr.Recognizer()
+            r.energy_threshold = 50  # Lower threshold
+            r.dynamic_energy_threshold = False
+            r.pause_threshold = 1.0
+            r.phrase_threshold = 0.3
+            r.non_speaking_duration = 0.8
+            
+            # Load audio file
+            with sr.AudioFile(temp_audio_path) as source:
+                st.info("🎧 Loading audio...")
+                # Don't adjust for ambient noise on short recordings
+                audio_data = r.record(source)
+                st.info("✅ Audio loaded successfully!")
+            
+            # Try multiple recognition services
+            st.info("🔍 Attempting transcription...")
+            
+            # Method 1: Google (most accurate)
+            try:
+                text = r.recognize_google(audio_data, language='en-US')
+                if text.strip():
+                    st.success(f"✅ Google transcription: '{text}'")
+                    return text.strip()
+            except sr.UnknownValueError:
+                st.warning("🔍 Google couldn't understand audio, trying alternatives...")
+            except sr.RequestError as e:
+                st.warning(f"🔍 Google service unavailable: {e}")
+            
+            # Method 2: Google with different language codes
+            for lang in ['en', 'en-IN', 'en-GB']:
+                try:
+                    text = r.recognize_google(audio_data, language=lang)
+                    if text.strip():
+                        st.success(f"✅ Google ({lang}) transcription: '{text}'")
+                        return text.strip()
+                except:
+                    continue
+            
+            # Method 3: Whisper (if available)
+            try:
+                text = r.recognize_whisper(audio_data, model="base")
+                if text.strip():
+                    st.success(f"✅ Whisper transcription: '{text}'")
+                    return text.strip()
+            except:
+                st.info("Whisper not available")
+            
+            # If all fails, return empty with helpful message
+            st.error("❌ Could not transcribe audio. Tips:")
+            st.error("• Speak clearly and loudly")
+            st.error("• Ensure good microphone quality")
+            st.error("• Try recording in a quiet environment")
+            st.error("• Check your internet connection")
+            return ""
+            
+        finally:
+            # Clean up temp file
+            try:
+                os.unlink(temp_audio_path)
             except:
                 pass
                 
-        except Exception as conversion_error:
-            st.warning(f"Audio conversion issue: {conversion_error}")
-            # Fallback: try direct processing
-            try:
-                with sr.AudioFile(temp_file_path) as source:
-                    r.adjust_for_ambient_noise(source, duration=0.5)
-                    audio = r.record(source)
-                os.unlink(temp_file_path)
-            except Exception as fallback_error:
-                st.error(f"Could not process audio file: {fallback_error}")
-                try:
-                    os.unlink(temp_file_path)
-                except:
-                    pass
-                return ""
-
-        # Try speech recognition
-        try:
-            text = r.recognize_google(audio, language='en-US')
-            st.success("✅ Transcription successful!")
-            return text.strip()
-        except sr.UnknownValueError:
-            st.warning("⚠️ Could not understand the audio clearly. Please try speaking louder and clearer.")
-            return ""
-        except sr.RequestError as e:
-            st.error(f"❌ Speech recognition service error: {e}")
-            return ""
-            
     except Exception as e:
         st.error(f"❌ Error processing audio: {str(e)}")
+        st.error("Please try recording again or check your microphone settings.")
         return ""
 
 def get_personalized_response(prompt):
