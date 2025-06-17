@@ -12,7 +12,6 @@ import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import json
-from audio_recorder_streamlit import audio_recorder
 
 try:
     TOGETHER_API_KEY = st.secrets["TOGETHER_API_KEY"]
@@ -89,26 +88,18 @@ def remove_emojis(text):
     return emoji_pattern.sub(r'', text).strip()
 
 def record_audio():
-    st.info("Click the microphone button below to start recording...")
-    audio_bytes = audio_recorder(
-        text="Click to record",
-        recording_color="#e87070",
-        neutral_color="#6aa36f",
-        icon_name="microphone",
-        icon_size="2x",
-    )
+    st.info("Use the audio input widget below to record your question...")
+    audio_bytes = st.audio_input("Record your interview question")
     
     if audio_bytes:
-        st.success("Recording complete!")
+        st.success("Recording received!")
         return audio_bytes
     return None
 
 def transcribe_audio(audio_bytes):
     r = sr.Recognizer()
     
-    audio_file = io.BytesIO(audio_bytes)
-    
-    with sr.AudioFile(audio_file) as source:
+    with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
         audio = r.record(source)
 
     try:
@@ -225,7 +216,7 @@ skills, and background. Perfect for practicing interview scenarios or getting to
 
 **How it works:**
 1. Click "Start Interview Question" 
-2. Ask any interview question (life story, superpowers, growth areas, etc.)
+2. Record your interview question using the audio input
 3. Listen to Ayush's personalized response
 """)
 
