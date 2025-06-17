@@ -6,4 +6,4 @@ gTTS==2.5.4
 soundfile==0.12.1
 scikit-learn==1.5.2
 pandas==2.2.3
-streamlit-audio-recorder==0.0.8
+audio-recorder-streamlit==0.0.8
