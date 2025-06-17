@@ -94,7 +94,7 @@ def remove_emojis(text):
     return emoji_pattern.sub(r'', text).strip()
 
 def transcribe_audio(audio_file):
-    """Transcribe audio file to text using speech recognition"""
+    """Enhanced transcribe audio file to text using speech recognition with multiple fallbacks"""
     if not audio_file:
         return ""
     
@@ -111,135 +111,236 @@ def transcribe_audio(audio_file):
         # Debug info
         st.info(f"Audio file size: {len(audio_bytes)} bytes")
         
-        # Method 1: Try direct processing with BytesIO (sometimes works better)
-        try:
-            st.info("🎧 Trying direct audio processing...")
-            r = sr.Recognizer()
-            
-            with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
-                # Record the entire audio file
-                audio_data = r.record(source)
-                
-            # Try Google recognition with longer timeout
-            try:
-                text = r.recognize_google(audio_data, language='en-US', show_all=False)
-                if text and text.strip():
-                    st.success(f"✅ Direct processing successful: '{text}'")
-                    return text.strip()
-            except sr.UnknownValueError:
-                st.info("Direct processing couldn't understand audio")
-            except sr.RequestError as e:
-                st.info(f"Direct processing request error: {e}")
-                
-        except Exception as e:
-            st.info(f"Direct processing failed: {e}")
-        
-        # Method 2: Save to temporary file and process
+        # Save to temporary file first (more reliable approach)
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
             temp_audio.write(audio_bytes)
             temp_audio_path = temp_audio.name
         
         try:
-            # Load and process audio with soundfile
+            # Enhanced audio preprocessing
             try:
                 data, samplerate = sf.read(temp_audio_path)
-                st.info(f"Original audio: {samplerate}Hz, {len(data)} samples")
+                st.info(f"Original audio: {samplerate}Hz, {len(data)} samples, duration: {len(data)/samplerate:.1f}s")
                 
                 # Ensure it's mono
                 if len(data.shape) > 1:
                     data = np.mean(data, axis=1)
                 
-                # Normalize audio (important for speech recognition)
+                # Audio enhancement steps
+                # 1. Remove DC offset
+                data = data - np.mean(data)
+                
+                # 2. Normalize with headroom
                 if np.max(np.abs(data)) > 0:
-                    data = data / np.max(np.abs(data)) * 0.8
+                    data = data / np.max(np.abs(data)) * 0.7  # Leave some headroom
                 
-                # Resample to 16kHz if needed (optimal for speech recognition)
-                if samplerate != 16000:
-                    from scipy import signal
-                    data = signal.resample(data, int(len(data) * 16000 / samplerate))
-                    samplerate = 16000
-                    st.info("Resampled to 16kHz for better recognition")
+                # 3. Simple noise gate (remove very quiet sections)
+                noise_threshold = np.max(np.abs(data)) * 0.02
+                data = np.where(np.abs(data) < noise_threshold, 0, data)
                 
-                # Save processed audio
+                # 4. Resample to 16kHz if needed (optimal for speech recognition)
+                target_sr = 16000
+                if samplerate != target_sr:
+                    # Use simple resampling if scipy not available
+                    try:
+                        from scipy import signal
+                        data = signal.resample(data, int(len(data) * target_sr / samplerate))
+                        samplerate = target_sr
+                        st.info(f"Resampled to {target_sr}Hz for better recognition")
+                    except ImportError:
+                        # Fallback: simple decimation/interpolation
+                        if samplerate > target_sr:
+                            # Downsample
+                            factor = int(samplerate // target_sr)
+                            data = data[::factor]
+                            samplerate = samplerate // factor
+                        st.info(f"Basic resampling to ~{samplerate}Hz")
+                
+                # 5. Apply simple pre-emphasis filter (boost high frequencies)
+                pre_emphasis = 0.97
+                data = np.append(data[0], data[1:] - pre_emphasis * data[:-1])
+                
+                # Save enhanced audio
                 processed_path = temp_audio_path.replace('.wav', '_processed.wav')
                 sf.write(processed_path, data, samplerate)
+                st.info("✅ Audio preprocessing complete")
                 
             except Exception as e:
                 st.warning(f"Audio processing error: {e}, using original file")
                 processed_path = temp_audio_path
             
-            # Initialize recognizer with optimal settings
+            # Initialize recognizer with enhanced settings
             r = sr.Recognizer()
-            r.energy_threshold = 300
-            r.dynamic_energy_threshold = True
-            r.pause_threshold = 0.8
-            r.operation_timeout = None
             
-            # Load processed audio
+            # Optimized recognizer settings
+            r.energy_threshold = 200  # Lower threshold for quiet audio
+            r.dynamic_energy_threshold = True
+            r.dynamic_energy_adjustment_damping = 0.15
+            r.dynamic_energy_ratio = 1.5
+            r.pause_threshold = 0.6  # Shorter pause threshold
+            r.operation_timeout = 10  # Prevent infinite hanging
+            r.phrase_threshold = 0.3
+            r.non_speaking_duration = 0.5
+            
+            # Load and adjust audio
             with sr.AudioFile(processed_path) as source:
-                st.info("🎧 Loading processed audio...")
-                # Adjust for ambient noise briefly
-                r.adjust_for_ambient_noise(source, duration=0.2)
+                st.info("🎧 Loading and analyzing audio...")
+                
+                # More aggressive noise adjustment
+                r.adjust_for_ambient_noise(source, duration=min(1.0, len(data)/samplerate/3))
+                
+                # Record with specific settings
                 audio_data = r.record(source)
                 st.info("✅ Audio loaded successfully!")
             
-            # Try multiple recognition attempts with different settings
-            st.info("🔍 Attempting transcription...")
+            # Multiple transcription attempts with different strategies
+            transcription_results = []
             
-            # Attempt 1: Standard Google
-            try:
-                text = r.recognize_google(audio_data, language='en-US')
-                if text and text.strip():
-                    st.success(f"✅ Google transcription: '{text}'")
-                    return text.strip()
-            except sr.UnknownValueError:
-                st.info("Google attempt 1 failed")
-            except sr.RequestError as e:
-                st.warning(f"Google service error: {e}")
+            # Strategy 1: Standard Google with multiple languages
+            st.info("🔍 Attempting Google Speech Recognition...")
+            languages_to_try = ['en-US', 'en-IN', 'en-GB', 'en-AU', 'en']
             
-            # Attempt 2: Google with show_all (get confidence scores)
-            try:
-                result = r.recognize_google(audio_data, language='en-US', show_all=True)
-                if result and 'alternative' in result:
-                    for alt in result['alternative']:
-                        if 'transcript' in alt and alt['transcript'].strip():
-                            confidence = alt.get('confidence', 0)
-                            st.success(f"✅ Google (confidence {confidence:.2f}): '{alt['transcript']}'")
-                            return alt['transcript'].strip()
-            except Exception as e:
-                st.info(f"Google detailed attempt failed: {e}")
-            
-            # Attempt 3: Different language variants
-            for lang in ['en', 'en-IN', 'en-GB']:
+            for lang in languages_to_try:
                 try:
                     text = r.recognize_google(audio_data, language=lang)
                     if text and text.strip():
+                        confidence_score = 0.8  # Assume high confidence for successful recognition
+                        transcription_results.append((text.strip(), confidence_score, f"Google-{lang}"))
                         st.success(f"✅ Google ({lang}): '{text}'")
-                        return text.strip()
-                except:
+                        break  # Stop on first success
+                except sr.UnknownValueError:
+                    continue
+                except sr.RequestError as e:
+                    st.warning(f"Google {lang} service error: {e}")
                     continue
             
-            # Attempt 4: Bing (if available)
-            try:
-                # You'd need to set up Bing API key for this
-                # text = r.recognize_bing(audio_data, key="YOUR_BING_KEY")
-                pass
-            except:
-                pass
+            # Strategy 2: Google with show_all for confidence scores
+            if not transcription_results:
+                st.info("🔍 Trying detailed Google recognition...")
+                try:
+                    result = r.recognize_google(audio_data, language='en-US', show_all=True)
+                    if result and 'alternative' in result:
+                        for alt in result['alternative']:
+                            if 'transcript' in alt and alt['transcript'].strip():
+                                confidence = alt.get('confidence', 0.5)
+                                transcription_results.append((alt['transcript'].strip(), confidence, "Google-detailed"))
+                                st.info(f"Google alternative (confidence {confidence:.2f}): '{alt['transcript']}'")
+                except Exception as e:
+                    st.info(f"Detailed Google recognition failed: {e}")
             
+            # Strategy 3: Try with different audio processing
+            if not transcription_results:
+                st.info("🔍 Trying with audio amplification...")
+                try:
+                    # Amplify audio and try again
+                    amplified_data = data * 2.0
+                    amplified_data = np.clip(amplified_data, -1.0, 1.0)
+                    
+                    amplified_path = temp_audio_path.replace('.wav', '_amplified.wav')
+                    sf.write(amplified_path, amplified_data, samplerate)
+                    
+                    with sr.AudioFile(amplified_path) as source:
+                        r.adjust_for_ambient_noise(source, duration=0.2)
+                        audio_data_amp = r.record(source)
+                    
+                    text = r.recognize_google(audio_data_amp, language='en-US')
+                    if text and text.strip():
+                        transcription_results.append((text.strip(), 0.7, "Google-amplified"))
+                        st.success(f"✅ Amplified audio recognition: '{text}'")
+                    
+                    # Clean up
+                    if os.path.exists(amplified_path):
+                        os.unlink(amplified_path)
+                        
+                except Exception as e:
+                    st.info(f"Amplified audio attempt failed: {e}")
+            
+            # Strategy 4: Try Whisper-like preprocessing (if available)
+            if not transcription_results:
+                st.info("🔍 Trying advanced audio preprocessing...")
+                try:
+                    # Apply more aggressive noise reduction
+                    # Simple spectral subtraction approach
+                    from scipy.signal import butter, filtfilt
+                    
+                    # High-pass filter to remove low-frequency noise
+                    nyquist = samplerate / 2
+                    low_cutoff = 80 / nyquist
+                    high_cutoff = 8000 / nyquist
+                    
+                    b, a = butter(4, [low_cutoff, high_cutoff], btype='band')
+                    filtered_data = filtfilt(b, a, data)
+                    
+                    # Normalize again
+                    filtered_data = filtered_data / np.max(np.abs(filtered_data)) * 0.8
+                    
+                    filtered_path = temp_audio_path.replace('.wav', '_filtered.wav')
+                    sf.write(filtered_path, filtered_data, samplerate)
+                    
+                    with sr.AudioFile(filtered_path) as source:
+                        r.adjust_for_ambient_noise(source, duration=0.1)
+                        audio_data_filt = r.record(source)
+                    
+                    text = r.recognize_google(audio_data_filt, language='en-US')
+                    if text and text.strip():
+                        transcription_results.append((text.strip(), 0.6, "Google-filtered"))
+                        st.success(f"✅ Filtered audio recognition: '{text}'")
+                    
+                    # Clean up
+                    if os.path.exists(filtered_path):
+                        os.unlink(filtered_path)
+                        
+                except ImportError:
+                    st.info("Advanced filtering not available (scipy not installed)")
+                except Exception as e:
+                    st.info(f"Filtered audio attempt failed: {e}")
+            
+            # Select best result
+            if transcription_results:
+                # Sort by confidence score
+                best_result = max(transcription_results, key=lambda x: x[1])
+                st.success(f"🎯 Best transcription ({best_result[2]}, confidence: {best_result[1]:.2f}): '{best_result[0]}'")
+                return best_result[0]
+            
+            # If all methods failed, provide detailed debugging info
             st.error("❌ All transcription methods failed.")
-            st.error("🔧 Debug info:")
-            st.error(f"• Audio duration: ~{len(data)/samplerate:.1f} seconds")
-            st.error(f"• Sample rate: {samplerate}Hz")
-            st.error(f"• Audio level: {np.max(np.abs(data)):.3f}")
+            st.markdown("### 🔧 Debug Information:")
+            st.write(f"• **Audio duration:** {len(data)/samplerate:.1f} seconds")
+            st.write(f"• **Sample rate:** {samplerate}Hz")
+            st.write(f"• **Audio level:** {np.max(np.abs(data)):.3f}")
+            st.write(f"• **RMS level:** {np.sqrt(np.mean(data**2)):.3f}")
+            st.write(f"• **Zero crossing rate:** {np.mean(np.abs(np.diff(np.sign(data)))):.3f}")
             
-            # Suggest manual text input as fallback
-            st.info("💡 Try typing your question instead:")
+            # Audio quality assessment
+            if len(data)/samplerate < 1.0:
+                st.warning("⚠️ Audio is very short (< 1 second). Try speaking for longer.")
+            elif np.max(np.abs(data)) < 0.1:
+                st.warning("⚠️ Audio level is very low. Try speaking louder or closer to the microphone.")
+            elif np.sqrt(np.mean(data**2)) < 0.01:
+                st.warning("⚠️ Audio appears to be mostly silence. Check your microphone.")
+            
+            # Provide helpful suggestions
+            st.markdown("### 💡 Troubleshooting Tips:")
+            st.markdown("""
+            - **Speak clearly and loudly** into your microphone
+            - **Reduce background noise** as much as possible
+            - **Use a good quality microphone** or headset
+            - **Speak for at least 2-3 seconds**
+            - **Try the manual text input** as a fallback
+            """)
+            
             return "FALLBACK_TO_TEXT_INPUT"
             
         finally:
-            # Clean up temp files
-            for path in [temp_audio_path, temp_audio_path.replace('.wav', '_processed.wav')]:
+            # Clean up all temp files
+            temp_files = [
+                temp_audio_path,
+                temp_audio_path.replace('.wav', '_processed.wav'),
+                temp_audio_path.replace('.wav', '_amplified.wav'),
+                temp_audio_path.replace('.wav', '_filtered.wav')
+            ]
+            
+            for path in temp_files:
                 try:
                     if os.path.exists(path):
                         os.unlink(path)
@@ -248,8 +349,8 @@ def transcribe_audio(audio_file):
                     
     except Exception as e:
         st.error(f"❌ Error processing audio: {str(e)}")
-        return ""
-
+        st.error("Please try recording again or use the text input option.")
+        return "FALLBACK_TO_TEXT_INPUT"
 def get_personalized_response(prompt):
     """Generate personalized response using Together API"""
     if not prompt.strip():
