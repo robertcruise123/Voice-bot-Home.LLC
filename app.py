@@ -4,6 +4,7 @@ import numpy as np
 import io
 from together import Together
 import os
+import soundfile as sf
 from gtts import gTTS
 import tempfile
 import time
