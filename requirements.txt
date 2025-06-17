@@ -1,4 +1,3 @@
-
 streamlit==1.45.1
 SpeechRecognition==3.14.3
 numpy==1.26.4
@@ -7,4 +6,4 @@ gTTS==2.5.4
 soundfile==0.12.1
 scikit-learn==1.5.2
 pandas==2.2.3
-audio-recorder-streamlit==0.0.12
+streamlit-audio-recorder==0.0.8
