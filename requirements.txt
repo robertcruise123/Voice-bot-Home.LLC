@@ -1,5 +1,5 @@
 ﻿aiohappyeyeballs==2.6.1
-streamlit-audio-recorder
+audio-recorder-streamlit
 aiohttp==3.12.13
 aiosignal==1.3.2
 altair==5.5.0
