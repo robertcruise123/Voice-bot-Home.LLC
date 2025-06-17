@@ -93,9 +93,9 @@ def remove_emojis(text):
     
     return emoji_pattern.sub(r'', text).strip()
 
-def transcribe_audio(audio_bytes):
-    """Transcribe audio bytes to text using speech recognition"""
-    if not audio_bytes:
+def transcribe_audio(audio_file):
+    """Transcribe audio file to text using speech recognition"""
+    if not audio_file:
         return ""
     
     r = sr.Recognizer()
@@ -103,14 +103,23 @@ def transcribe_audio(audio_bytes):
     r.dynamic_energy_threshold = True
     
     try:
+        st.info("🎯 Transcribing your question...")
+        
+        # Handle UploadedFile object from st.audio_input
+        if hasattr(audio_file, 'read'):
+            # It's an UploadedFile object, read the bytes
+            audio_bytes = audio_file.read()
+            audio_file.seek(0)  # Reset file pointer
+        else:
+            # It's already bytes
+            audio_bytes = audio_file
+        
         # Convert audio bytes to AudioFile
         with sr.AudioFile(io.BytesIO(audio_bytes)) as source:
             # Adjust for ambient noise
             r.adjust_for_ambient_noise(source, duration=0.5)
             audio = r.record(source)
 
-        st.info("🎯 Transcribing your question...")
-        
         # Try multiple recognition methods
         text = ""
         try:
@@ -122,7 +131,7 @@ def transcribe_audio(audio_bytes):
             return ""
         except sr.RequestError as e:
             st.error(f"❌ Speech recognition service error: {e}")
-            # Fallback to alternative service
+            # Fallback to alternative service if available
             try:
                 text = r.recognize_sphinx(audio)
                 st.info("✅ Used offline transcription")
@@ -241,10 +250,10 @@ st.header("🎯 Interview Session")
 
 # Audio input
 st.markdown("### Record Your Question")
-audio_bytes = st.audio_input("🎙️ Click to record your interview question")
+audio_file = st.audio_input("🎙️ Click to record your interview question")
 
 # Process audio when uploaded
-if audio_bytes is not None and not st.session_state.processing:
+if audio_file is not None and not st.session_state.processing:
     st.session_state.processing = True
     
     with st.container():
@@ -252,7 +261,7 @@ if audio_bytes is not None and not st.session_state.processing:
         
         # Step 1: Transcribe
         with st.spinner("Processing your audio..."):
-            transcribed_text = transcribe_audio(audio_bytes)
+            transcribed_text = transcribe_audio(audio_file)
         
         if transcribed_text:
             # Display question
