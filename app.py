@@ -1,7 +1,5 @@
 import streamlit as st
 import speech_recognition as sr
-import soundfile as sf
-import sounddevice as sd
 import numpy as np
 import io
 from together import Together
@@ -13,6 +11,7 @@ import re
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import json
+from audio_recorder_streamlit import audio_recorder
 
 try:
     TOGETHER_API_KEY = st.secrets["TOGETHER_API_KEY"]
@@ -88,35 +87,27 @@ def remove_emojis(text):
     
     return emoji_pattern.sub(r'', text).strip()
 
-def record_audio(duration=5, fs=44100):
-    st.info(f"Recording for {duration} seconds...")
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+def record_audio():
+    st.info("Click the microphone button below to start recording...")
+    audio_bytes = audio_recorder(
+        text="Click to record",
+        recording_color="#e87070",
+        neutral_color="#6aa36f",
+        icon_name="microphone",
+        icon_size="2x",
+    )
     
-    with st.spinner("Listening..."):
-        recording = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
-        
-        for i in range(duration):
-            time.sleep(1)
-            progress_bar.progress((i + 1) / duration)
-            status_text.text(f"Recording... {i + 1}/{duration} seconds")
-        
-        sd.wait()
-    
-    progress_bar.empty()
-    status_text.empty()
-    st.success("Recording complete!")
-    return recording, fs
+    if audio_bytes:
+        st.success("Recording complete!")
+        return audio_bytes
+    return None
 
-def transcribe_audio(audio_data, sample_rate):
+def transcribe_audio(audio_bytes):
     r = sr.Recognizer()
     
-    audio_data_float = audio_data.astype(np.float32) / np.iinfo(np.int16).max
-    buffer = io.BytesIO()
-    sf.write(buffer, audio_data_float, sample_rate, format='WAV')
-    buffer.seek(0)
-
-    with sr.AudioFile(buffer) as source:
+    audio_file = io.BytesIO(audio_bytes)
+    
+    with sr.AudioFile(audio_file) as source:
         audio = r.record(source)
 
     try:
@@ -187,11 +178,11 @@ def text_to_speech(text, lang='en'):
             st.error(f"Error generating speech: {e}")
             return None
 
-def process_voice_interaction(duration):
-    audio_data, fs = record_audio(duration=duration)
+def process_voice_interaction():
+    audio_bytes = record_audio()
     
-    if audio_data is not None:
-        transcribed_text = transcribe_audio(audio_data, fs)
+    if audio_bytes is not None:
+        transcribed_text = transcribe_audio(audio_bytes)
         
         if transcribed_text:
             st.write(f"**Question:** {transcribed_text}")
@@ -251,16 +242,11 @@ if "conversation" not in st.session_state:
 
 st.header("Interview Session")
 
-col1, col2 = st.columns([3, 1])
-
-with col1:
-    recording_duration = st.slider("Recording duration (seconds):", 3, 15, 7)
-
 if st.button("Start Interview Question", key="interview_button", type="primary"):
     st.markdown("---")
     
     with st.container():
-        success = process_voice_interaction(recording_duration)
+        success = process_voice_interaction()
         
         if success:
             st.markdown("---")
