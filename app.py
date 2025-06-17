@@ -266,7 +266,7 @@ def transcribe_audio(audio_file):
                     # High-pass filter to remove low-frequency noise
                     nyquist = samplerate / 2
                     low_cutoff = 80 / nyquist
-                    high_cutoff = 8000 / nyquist
+                    high_cutoff = (samplerate / 2 - 1) / nyquist
                     
                     b, a = butter(4, [low_cutoff, high_cutoff], btype='band')
                     filtered_data = filtfilt(b, a, data)
