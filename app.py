@@ -46,13 +46,8 @@ def enhanced_speech_to_text(audio_file_path):
     temp_files_to_clean_up = []  # List to keep track of temporary files for cleanup
 
     try:
-        st.info("🎯 Processing your audio...")
-
         # Read audio file
         audio_bytes = open(audio_file_path, 'rb').read()
-        
-        # Debug info
-        st.info(f"Audio file size: {len(audio_bytes)} bytes")
 
         # Save to temporary file first (more reliable approach)
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
@@ -63,7 +58,6 @@ def enhanced_speech_to_text(audio_file_path):
         try:
             # Enhanced audio preprocessing
             data, samplerate = sf.read(temp_audio_path)
-            st.info(f"Original audio: {samplerate}Hz, {len(data)} samples, duration: {len(data)/samplerate:.1f}s")
 
             # Ensure it's mono
             if len(data.shape) > 1:
@@ -72,12 +66,10 @@ def enhanced_speech_to_text(audio_file_path):
             # Audio enhancement steps
             # 1. Remove DC offset
             data = data - np.mean(data)
-            st.info(f"After DC offset removal - Peak: {np.max(np.abs(data)):.3f}, RMS: {np.sqrt(np.mean(data**2)):.3f}")
 
             # 2. Normalize with headroom
             if np.max(np.abs(data)) > 0:
                 data = data / np.max(np.abs(data)) * 0.9  # Normalize to 90% of max
-            st.info(f"After normalization - Peak: {np.max(np.abs(data)):.3f}, RMS: {np.sqrt(np.mean(data**2)):.3f}")
 
             # 4. Resample to 16kHz if needed (optimal for speech recognition)
             target_sr = 16000
@@ -85,27 +77,21 @@ def enhanced_speech_to_text(audio_file_path):
                 try:
                     data = signal.resample(data, int(len(data) * target_sr / samplerate))
                     samplerate = target_sr
-                    st.info(f"Resampled to {target_sr}Hz for better recognition")
                 except ImportError:
                     if samplerate > target_sr:
                         factor = int(samplerate // target_sr)
                         data = data[::factor]
                         samplerate = samplerate // factor
-                    st.info(f"Basic resampling to ~{samplerate}Hz")
-            st.info(f"After resampling - Peak: {np.max(np.abs(data)):.3f}, RMS: {np.sqrt(np.mean(data**2)):.3f}")
 
             # 5. Apply simple pre-emphasis filter (boost high frequencies)
             pre_emphasis = 0.97
             data = np.append(data[0], data[1:] - pre_emphasis * data[:-1])
-            st.info(f"After pre-emphasis - Peak: {np.max(np.abs(data)):.3f}, RMS: {np.sqrt(np.mean(data**2)):.3f}")
 
             processed_path = temp_audio_path.replace('.wav', '_processed.wav')
             sf.write(processed_path, data, samplerate)
             temp_files_to_clean_up.append(processed_path)
-            st.info("✅ Audio preprocessing complete")
 
         except Exception as e:
-            st.warning(f"Audio processing error in initial steps: {e}, using original file")
             processed_path = temp_audio_path
 
         # Initialize recognizer with enhanced settings
@@ -123,21 +109,13 @@ def enhanced_speech_to_text(audio_file_path):
 
         # Load and adjust audio
         with sr.AudioFile(processed_path) as source:
-            st.info("🎧 Loading and analyzing audio...")
-
-            st.info(f"Current energy threshold before adjustment: {r.energy_threshold}")
             r.adjust_for_ambient_noise(source, duration=0.1)  # Shorter duration for noise adjustment
-            st.info(f"Energy threshold after adjustment: {r.energy_threshold}")
-
             audio_data = r.record(source)
-            st.info(f"Recorded audio data length for recognition: {len(audio_data.frame_data)} bytes")
-            st.info("✅ Audio loaded successfully!")
 
         # Multiple transcription attempts with different strategies
         transcription_results = []
 
         # Strategy 1: Standard Google with multiple languages
-        st.info("🔍 Attempting Google Speech Recognition (Strategy 1)...")
         languages_to_try = ['en-US', 'en-IN', 'en-GB', 'en-AU', 'en']
 
         for lang in languages_to_try:
@@ -146,18 +124,14 @@ def enhanced_speech_to_text(audio_file_path):
                 if text and text.strip():
                     confidence_score = 0.8
                     transcription_results.append((text.strip(), confidence_score, f"Google-{lang}"))
-                    st.success(f"✅ Google ({lang}): '{text}'")
                     break
             except sr.UnknownValueError:
-                st.info(f"Google ({lang}): Could not understand audio (UnknownValueError).")
                 continue
             except sr.RequestError as e:
-                st.warning(f"Google {lang} service error: {e}")
                 continue
 
         # Strategy 2: Google with show_all for confidence scores
         if not transcription_results:
-            st.info("🔍 Trying detailed Google recognition (Strategy 2)...")
             try:
                 result = r.recognize_google(audio_data, language='en-US', show_all=True)
                 if result and 'alternative' in result:
@@ -165,17 +139,13 @@ def enhanced_speech_to_text(audio_file_path):
                         if 'transcript' in alt and alt['transcript'].strip():
                             confidence = alt.get('confidence', 0.5)
                             transcription_results.append((alt['transcript'].strip(), confidence, "Google-detailed"))
-                            st.info(f"Google alternative (confidence {confidence:.2f}): '{alt['transcript']}'")
-                else:
-                    st.info("Detailed Google recognition returned no alternatives.")
             except sr.UnknownValueError:
-                st.info("Detailed Google recognition: Could not understand audio (UnknownValueError).")
+                pass
             except Exception as e:
-                st.info(f"Detailed Google recognition failed: {e}")
+                pass
 
         # Strategy 3: Try with audio amplification
         if not transcription_results:
-            st.info("🔍 Trying with audio amplification (Strategy 3)...")
             try:
                 # Re-read original data for amplification
                 data_amp, samplerate_amp = sf.read(temp_audio_path)
@@ -200,16 +170,14 @@ def enhanced_speech_to_text(audio_file_path):
                 text = r_amp.recognize_google(audio_data_amp, language='en-US')
                 if text and text.strip():
                     transcription_results.append((text.strip(), 0.7, "Google-amplified"))
-                    st.success(f"✅ Amplified audio recognition: '{text}'")
 
             except sr.UnknownValueError:
-                st.info("Amplified audio attempt: Could not understand audio (UnknownValueError).")
+                pass
             except Exception as e:
-                st.info(f"Amplified audio attempt failed: {e}")
+                pass
 
         # Strategy 4: Try advanced audio preprocessing (band-pass filter)
         if not transcription_results:
-            st.info("🔍 Trying advanced audio preprocessing (Strategy 4 - Bandpass Filter)...")
             try:
                 # Re-read original data for this strategy
                 data_filt, samplerate_filt = sf.read(temp_audio_path)
@@ -222,7 +190,6 @@ def enhanced_speech_to_text(audio_file_path):
                 high_cutoff = (samplerate_filt / 2 - 1) / nyquist
                 
                 if not (0 < low_cutoff < 1 and 0 < high_cutoff < 1 and low_cutoff < high_cutoff):
-                    st.error(f"Filter frequency validation failed: low={low_cutoff}, high={high_cutoff}. Skipping this strategy.")
                     raise ValueError("Filter frequency validation failed")
                     
                 b, a = signal.butter(4, [low_cutoff, high_cutoff], btype='band')
@@ -245,54 +212,22 @@ def enhanced_speech_to_text(audio_file_path):
                 text = r_filt.recognize_google(audio_data_filt, language='en-US')
                 if text and text.strip():
                     transcription_results.append((text.strip(), 0.6, "Google-filtered"))
-                    st.success(f"✅ Filtered audio recognition: '{text}'")
 
             except ImportError:
-                st.info("Advanced filtering not available (scipy not installed for this strategy).")
+                pass
             except sr.UnknownValueError:
-                st.info("Filtered audio attempt: Could not understand audio (UnknownValueError).")
+                pass
             except Exception as e:
-                st.info(f"Filtered audio attempt failed: {e}")
+                pass
 
         # Select best result
         if transcription_results:
             best_result = max(transcription_results, key=lambda x: x[1])
-            st.success(f"🎯 Best transcription ({best_result[2]}, confidence: {best_result[1]:.2f}): '{best_result[0]}'")
             return best_result[0]
-
-        # If all methods failed, provide detailed debugging info
-        st.error("❌ All transcription methods failed.")
-        st.markdown("### 🔧 Debug Information:")
-        st.write(f"• **Audio duration:** {len(data)/samplerate:.1f} seconds")
-        st.write(f"• **Sample rate:** {samplerate}Hz")
-        st.write(f"• **Audio level (Peak):** {np.max(np.abs(data)):.3f}")
-        st.write(f"• **RMS level (Average):** {np.sqrt(np.mean(data**2)):.3f}")
-        st.write(f"• **Zero crossing rate:** {np.mean(np.abs(np.diff(np.sign(data)))):.3f}")
-        
-        final_rms = np.sqrt(np.mean(data**2))
-        if final_rms < 0.005:
-            st.warning("⚠️ **Critical:** Processed audio RMS level is extremely low. This usually means there's no detectable speech or it's too quiet. Speech recognition will struggle.")
-        elif final_rms < 0.05:
-            st.warning("⚠️ Processed audio RMS level is low. Speech might be too quiet compared to silence.")
-        
-        if np.max(np.abs(data)) < 0.1:
-            st.warning("⚠️ Processed audio peak level is very low, even after normalization. This can indicate very little signal content.")
-
-        # Provide helpful suggestions
-        st.markdown("### 💡 Troubleshooting Tips:")
-        st.markdown("""
-        - **Speak clearly and loudly** directly into your microphone.
-        - Ensure your **microphone volume** is set appropriately on your device.
-        - **Reduce background noise** as much as possible in your recording environment.
-        - Try recording a longer phrase (5-10 seconds) with clear, distinct words.
-        - If possible, record the audio in a dedicated app (like Voice Recorder on Windows/Mac) and upload the `.wav` file directly.
-        """)
 
         return ""
 
     except Exception as e:
-        st.error(f"❌ Critical error during audio processing: {str(e)}")
-        st.error("Please try recording again or use the text input option.")
         return ""
 
     finally:
@@ -302,7 +237,7 @@ def enhanced_speech_to_text(audio_file_path):
                 if os.path.exists(path):
                     os.unlink(path)
             except Exception as e:
-                st.warning(f"Failed to delete temp file {path}: {e}")
+                pass
 
 def initialize_session_state():
     if "messages" not in st.session_state:
@@ -313,6 +248,31 @@ def initialize_session_state():
 initialize_session_state()
 
 st.title("OpenAI Conversational Chatbot 🤖")
+
+# Sample Interview Questions Dropdown
+st.subheader("💡 Sample Interview Questions")
+sample_questions = [
+    "Select a question...",
+    "What should we know about your life story in a few sentences?",
+    "What's your #1 superpower?",
+    "What are the top 3 areas you'd like to grow in?",
+    "What misconception do your coworkers have about you?",
+    "How do you push your boundaries and limits?"
+]
+
+selected_question = st.selectbox(
+    "Choose a sample question to ask:",
+    sample_questions,
+    key="sample_question_selector"
+)
+
+# Add the selected question to chat when user selects one
+if selected_question != "Select a question..." and selected_question:
+    if st.button("Ask this question", key="ask_sample_question"):
+        st.session_state.messages.append({"role": "user", "content": selected_question})
+        st.rerun()
+
+st.divider()
 
 # Create footer container for the microphone
 footer_container = st.container()
