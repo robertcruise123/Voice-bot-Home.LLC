@@ -27,15 +27,15 @@ DEEPSEEK_MODEL = "deepseek-ai/deepseek-V3"
 
 # Personal Knowledge Base for RAG
 PERSONAL_KNOWLEDGE_BASE = {
-    "life_story": "I am Ayush Sarkar ,i recently graduated in June from Sikkim Manipal Institute of Technology as a BCA student. To speak about myself I love to cook, I travel a lot and very much interested in photography , I go to the gym regularly to balance a healthy lifestyle and look good. In this field of AI/ML i have kept a keen interest since 2 years or so and I would say i learnt a lot from my own from the college from friends and built some interesting projects applying those skills and I am proud to say that i am a very passionate learner for this field and things which interest me i work hard to meet deadlines and learn with every project as much as possible.",
+    "life_story": "I am Ayush Sarkar, I recently graduated in June from Sikkim Manipal Institute of Technology with a Bachelor's degree in Computer Applications. To speak about myself, I love to cook, I travel a lot and am very much interested in photography. I go to the gym regularly to balance a healthy lifestyle and look good. In this field of AI/ML, I have kept a keen interest for about 2 years now and I would say I learnt a lot on my own, from college, from friends and built some interesting projects applying those skills. I am proud to say that I am a very passionate learner for this field and when things interest me, I work hard to meet deadlines and learn as much as possible with every project.",
     
-    "superpower": "My main super power is to make something possible by hook or crook if i don't know something i would learn about it use every tool possible maybe it will be outside my capabilities but i would always make out ways to do it efficiently and bring out a solution every time i am faced with a challenge , that determination is my super power.",
+    "superpower": "My main superpower is to make something possible by hook or crook. If I don't know something, I would learn about it and use every tool possible. Maybe it will be outside my capabilities but I would always find ways to do it efficiently and bring out a solution every time I am faced with a challenge. That determination is my superpower.",
     
-    "growth_areas": "Top 3 areas i would like to grow are - 1. AI/ML since the start i have always wanted to learn more and more about this filed and make my core so strong that i have knowledge from depths and always have a solution in hand if I am faced with such problems. 2. problem solving skills - In code i want to be as efficient as i can be to improve the overall performance i would like give it my all to learn and solve problems as quickly as possible. 3. Project Management - I have some skills in project management as i have made a group project and i was the team leader so planning and plotting what to do when to do how do makes this thing really interesting as without a proper plan it seems vague and easy to get lost. I would love get more hands on real world experience and work as a team so that i get to learn more about management and cooperation.",
+    "growth_areas": "Top 3 areas I would like to grow are: 1. AI/ML - since the start I have always wanted to learn more and more about this field and make my core so strong that I have knowledge from the depths and always have a solution in hand if I am faced with such problems. 2. Problem solving skills - In coding I want to be as efficient as I can be to improve the overall performance. I would like to give it my all to learn and solve problems as quickly as possible. 3. Project Management - I have some skills in project management as I have made a group project and I was the team leader, so planning and plotting what to do, when to do, how to do makes this thing really interesting as without a proper plan it seems vague and easy to get lost. I would love to get more hands-on real world experience and work as a team so that I get to learn more about management and cooperation.",
     
-    "misconceptions": "People feel like i am chill and like to relax be lazy but when it comes to actual work i like to work hard and complete the task with utter determination. Another would be people might not think i am good at cooking but they should try my white sauce chicken pasta.",
+    "misconceptions": "People feel like I am chill and like to relax and be lazy, but when it comes to actual work I like to work hard and complete the task with utter determination. Another would be people might not think I am good at cooking, but they should try my white sauce chicken pasta.",
     
-    "overcome_challenges": "When i was working on my college project as being the team leader i had to make sure that everything was right from top to bottom with every presentation we had, i worked very late at night from afternoon till past midnight just to make sure that there's nothing wrong and it was all according to the requirements, i made sure that if my teammates made any mistake i would rectify them right away and inform that there was a mistake and what was it so they are well informed and would know what not to do next. We had to make a report for every progress every month and present about it to all the faculties so any mistake would cost us marks so with a lot of dedication i made sure that the project at the end of the semester was a success."
+    "overcome_challenges": "When I was working on my college project as being the team leader, I had to make sure that everything was right from top to bottom with every presentation we had. I worked very late at night from afternoon till past midnight just to make sure that there's nothing wrong and it was all according to the requirements. I made sure that if my teammates made any mistake I would rectify them right away and inform them that there was a mistake and what it was so they are well informed and would know what not to do next. We had to make a report for every progress every month and present about it to all the faculties, so any mistake would cost us marks. With a lot of dedication, I made sure that the project at the end of the semester was a success."
 }
 
 def create_knowledge_chunks():
@@ -71,19 +71,22 @@ def get_answer(messages):
         relevant_context = find_relevant_context(latest_message)
         
         # Create system prompt with RAG context
-        system_prompt = f"""You are Ayush Sarkar, a recent BCA graduate from Sikkim Manipal Institute of Technology.
+        system_prompt = f"""You are Ayush Sarkar, speaking naturally in first person about yourself.
         
         Here is your personal information to draw from:
         {relevant_context}
         
         Instructions:
-        - Answer as Ayush Sarkar in first person
-        - Be conversational, professional, and show personality
-        - Use the provided personal context to give authentic answers
+        - Respond as Ayush naturally and conversationally
+        - Be authentic, professional, and show your personality
+        - Use the provided personal context to give genuine answers
         - Add appropriate humor where it fits naturally
-        - Keep responses concise but informative
+        - Keep responses concise but informative (2-4 sentences typically)
         - Don't use emojis in your response
+        - Avoid repeatedly mentioning your degree or college unless specifically asked about education
+        - Focus on the substance of what you're sharing rather than credentials
         - If asked about something not in your background, be honest but relate it to your learning mindset
+        - Sound like a real person having a conversation, not giving a resume
         """
         
         # Format messages for the API
@@ -93,7 +96,7 @@ def get_answer(messages):
         response = client.chat.completions.create(
             model=DEEPSEEK_MODEL,
             messages=formatted_messages,
-            max_tokens=500,
+            max_tokens=400,
             temperature=0.7,
             timeout=30
         )
