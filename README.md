@@ -18,7 +18,7 @@ Install Git
 📁 Step 2: Clone the Repository
 bash
 # Clone the project
-git clone [YOUR_REPOSITORY_URL_HERE]
+git clone [(https://github.com/robertcruise123/Voice-bot-Home.LLC)]
 # Navigate to the folder
 cd voice-bot
 
