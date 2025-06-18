@@ -249,6 +249,31 @@ initialize_session_state()
 
 st.title("OpenAI Conversational Chatbot 🤖")
 
+# Sample Interview Questions Dropdown
+st.subheader("💡 Sample Interview Questions")
+sample_questions = [
+    "Select a question...",
+    "What should we know about your life story in a few sentences?",
+    "What's your #1 superpower?",
+    "What are the top 3 areas you'd like to grow in?",
+    "What misconception do your coworkers have about you?",
+    "How do you push your boundaries and limits?"
+]
+
+selected_question = st.selectbox(
+    "Choose a sample question to ask:",
+    sample_questions,
+    key="sample_question_selector"
+)
+
+# Add the selected question to chat when user selects one
+if selected_question != "Select a question..." and selected_question:
+    if st.button("Ask this question", key="ask_sample_question"):
+        st.session_state.messages.append({"role": "user", "content": selected_question})
+        st.rerun()
+
+st.divider()
+
 # Create footer container for the microphone
 footer_container = st.container()
 with footer_container:
