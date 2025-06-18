@@ -13,65 +13,69 @@ from streamlit_float import *
 # Float feature initialization
 float_init()
 
+# Cache compiled regex for better performance
+@st.cache_data
+def get_emoji_pattern():
+    """Cache compiled emoji regex pattern"""
+    return re.compile("["
+                     u"\U0001F600-\U0001F64F"  # emoticons
+                     u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                     u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                     u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                     u"\U00002500-\U00002BEF"  # chinese char
+                     u"\U00002702-\U000027B0"
+                     u"\U00002702-\U000027B0"
+                     u"\U000024C2-\U0001F251"
+                     u"\U0001f926-\U0001f937"
+                     u"\U00010000-\U0010ffff"
+                     u"\u2640-\u2642" 
+                     u"\u2600-\u2B55"
+                     u"\u200d"
+                     u"\u23cf"
+                     u"\u23e9"
+                     u"\u231a"
+                     u"\ufe0f"  # dingbats
+                     u"\u3030"
+                     "]+", flags=re.UNICODE)
+
 def remove_emojis(text):
-    """Remove emojis from text"""
-    emoji_pattern = re.compile("["
-                               u"\U0001F600-\U0001F64F"  # emoticons
-                               u"\U0001F300-\U0001F5FF"  # symbols & pictographs
-                               u"\U0001F680-\U0001F6FF"  # transport & map symbols
-                               u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
-                               u"\U00002500-\U00002BEF"  # chinese char
-                               u"\U00002702-\U000027B0"
-                               u"\U00002702-\U000027B0"
-                               u"\U000024C2-\U0001F251"
-                               u"\U0001f926-\U0001f937"
-                               u"\U00010000-\U0010ffff"
-                               u"\u2640-\u2642" 
-                               u"\u2600-\u2B55"
-                               u"\u200d"
-                               u"\u23cf"
-                               u"\u23e9"
-                               u"\u231a"
-                               u"\ufe0f"  # dingbats
-                               u"\u3030"
-                               "]+", flags=re.UNICODE)
-    
+    """Remove emojis from text - OPTIMIZED"""
+    emoji_pattern = get_emoji_pattern()
     return emoji_pattern.sub(r'', text).strip()
 
 def enhanced_speech_to_text(audio_file_path):
-    """Enhanced transcribe audio file to text using speech recognition with multiple fallbacks"""
+    """OPTIMIZED transcribe audio file to text - Faster processing"""
     if not audio_file_path or not os.path.exists(audio_file_path):
         return ""
 
-    temp_files_to_clean_up = []  # List to keep track of temporary files for cleanup
+    temp_files_to_clean_up = []
 
     try:
         # Read audio file
         audio_bytes = open(audio_file_path, 'rb').read()
 
-        # Save to temporary file first (more reliable approach)
+        # Save to temporary file first
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
             temp_audio.write(audio_bytes)
             temp_audio_path = temp_audio.name
             temp_files_to_clean_up.append(temp_audio_path)
 
         try:
-            # Enhanced audio preprocessing
+            # OPTIMIZED audio preprocessing - fewer steps for speed
             data, samplerate = sf.read(temp_audio_path)
 
             # Ensure it's mono
             if len(data.shape) > 1:
                 data = np.mean(data, axis=1)
 
-            # Audio enhancement steps
-            # 1. Remove DC offset
-            data = data - np.mean(data)
+            # Essential audio enhancement only
+            data = data - np.mean(data)  # Remove DC offset
 
-            # 2. Normalize with headroom
+            # Normalize
             if np.max(np.abs(data)) > 0:
-                data = data / np.max(np.abs(data)) * 0.9  # Normalize to 90% of max
+                data = data / np.max(np.abs(data)) * 0.9
 
-            # 4. Resample to 16kHz if needed (optimal for speech recognition)
+            # Resample to 16kHz if needed
             target_sr = 16000
             if samplerate != target_sr:
                 try:
@@ -83,7 +87,7 @@ def enhanced_speech_to_text(audio_file_path):
                         data = data[::factor]
                         samplerate = samplerate // factor
 
-            # 5. Apply simple pre-emphasis filter (boost high frequencies)
+            # Simple pre-emphasis
             pre_emphasis = 0.97
             data = np.append(data[0], data[1:] - pre_emphasis * data[:-1])
 
@@ -94,136 +98,69 @@ def enhanced_speech_to_text(audio_file_path):
         except Exception as e:
             processed_path = temp_audio_path
 
-        # Initialize recognizer with enhanced settings
+        # OPTIMIZED recognizer settings for speed
         r = sr.Recognizer()
-
-        # Optimized recognizer settings
         r.energy_threshold = 200
         r.dynamic_energy_threshold = True
-        r.dynamic_energy_adjustment_damping = 0.15
-        r.dynamic_energy_ratio = 1.5
-        r.pause_threshold = 0.6
-        r.operation_timeout = 15  # Increased timeout
+        r.pause_threshold = 0.5  # Reduced
+        r.operation_timeout = 10  # Reduced from 15
         r.phrase_threshold = 0.3
-        r.non_speaking_duration = 0.5
+        r.non_speaking_duration = 0.4  # Reduced
 
         # Load and adjust audio
         with sr.AudioFile(processed_path) as source:
-            r.adjust_for_ambient_noise(source, duration=0.1)  # Shorter duration for noise adjustment
+            r.adjust_for_ambient_noise(source, duration=0.05)  # Faster noise adjustment
             audio_data = r.record(source)
 
-        # Multiple transcription attempts with different strategies
-        transcription_results = []
-
-        # Strategy 1: Standard Google with multiple languages
-        languages_to_try = ['en-US', 'en-IN', 'en-GB', 'en-AU', 'en']
+        # OPTIMIZATION: Try fewer languages for faster processing
+        languages_to_try = ['en-US', 'en-IN']  # Reduced from 5 to 2
 
         for lang in languages_to_try:
             try:
                 text = r.recognize_google(audio_data, language=lang)
                 if text and text.strip():
-                    confidence_score = 0.8
-                    transcription_results.append((text.strip(), confidence_score, f"Google-{lang}"))
-                    break
+                    return text.strip()
             except sr.UnknownValueError:
                 continue
             except sr.RequestError as e:
                 continue
 
-        # Strategy 2: Google with show_all for confidence scores
-        if not transcription_results:
-            try:
-                result = r.recognize_google(audio_data, language='en-US', show_all=True)
-                if result and 'alternative' in result:
-                    for alt in result['alternative']:
-                        if 'transcript' in alt and alt['transcript'].strip():
-                            confidence = alt.get('confidence', 0.5)
-                            transcription_results.append((alt['transcript'].strip(), confidence, "Google-detailed"))
-            except sr.UnknownValueError:
-                pass
-            except Exception as e:
-                pass
+        # OPTIMIZATION: Only one fallback strategy
+        try:
+            result = r.recognize_google(audio_data, language='en-US', show_all=True)
+            if result and 'alternative' in result:
+                for alt in result['alternative']:
+                    if 'transcript' in alt and alt['transcript'].strip():
+                        return alt['transcript'].strip()
+        except:
+            pass
 
-        # Strategy 3: Try with audio amplification
-        if not transcription_results:
-            try:
-                # Re-read original data for amplification
-                data_amp, samplerate_amp = sf.read(temp_audio_path)
-                if len(data_amp.shape) > 1:
-                    data_amp = np.mean(data_amp, axis=1)
-                
-                # Apply DC offset removal and then normalize
-                data_amp = data_amp - np.mean(data_amp)
-                if np.max(np.abs(data_amp)) > 0:
-                    data_amp = data_amp / np.max(np.abs(data_amp)) * 0.9
+        # Final fallback with amplification
+        try:
+            data_amp, samplerate_amp = sf.read(temp_audio_path)
+            if len(data_amp.shape) > 1:
+                data_amp = np.mean(data_amp, axis=1)
+            
+            data_amp = data_amp - np.mean(data_amp)
+            if np.max(np.abs(data_amp)) > 0:
+                data_amp = data_amp / np.max(np.abs(data_amp)) * 0.9
 
-                amplified_path = temp_audio_path.replace('.wav', '_amplified.wav')
-                sf.write(amplified_path, data_amp, samplerate_amp)
-                temp_files_to_clean_up.append(amplified_path)
+            amplified_path = temp_audio_path.replace('.wav', '_amplified.wav')
+            sf.write(amplified_path, data_amp, samplerate_amp)
+            temp_files_to_clean_up.append(amplified_path)
 
-                with sr.AudioFile(amplified_path) as source:
-                    r_amp = sr.Recognizer()
-                    r_amp.energy_threshold = 100
-                    r_amp.adjust_for_ambient_noise(source, duration=0.1)
-                    audio_data_amp = r_amp.record(source)
+            with sr.AudioFile(amplified_path) as source:
+                r_amp = sr.Recognizer()
+                r_amp.energy_threshold = 100
+                r_amp.adjust_for_ambient_noise(source, duration=0.05)  # Reduced
+                audio_data_amp = r_amp.record(source)
 
-                text = r_amp.recognize_google(audio_data_amp, language='en-US')
-                if text and text.strip():
-                    transcription_results.append((text.strip(), 0.7, "Google-amplified"))
+            text = r_amp.recognize_google(audio_data_amp, language='en-US')
+            if text and text.strip():
+                return text.strip()
 
-            except sr.UnknownValueError:
-                pass
-            except Exception as e:
-                pass
-
-        # Strategy 4: Try advanced audio preprocessing (band-pass filter)
-        if not transcription_results:
-            try:
-                # Re-read original data for this strategy
-                data_filt, samplerate_filt = sf.read(temp_audio_path)
-                if len(data_filt.shape) > 1:
-                    data_filt = np.mean(data_filt, axis=1)
-
-                # High-pass filter to remove low-frequency noise
-                nyquist = samplerate_filt / 2
-                low_cutoff = 80 / nyquist
-                high_cutoff = (samplerate_filt / 2 - 1) / nyquist
-                
-                if not (0 < low_cutoff < 1 and 0 < high_cutoff < 1 and low_cutoff < high_cutoff):
-                    raise ValueError("Filter frequency validation failed")
-                    
-                b, a = signal.butter(4, [low_cutoff, high_cutoff], btype='band')
-                filtered_data = signal.filtfilt(b, a, data_filt)
-
-                # Normalize again after filtering
-                if np.max(np.abs(filtered_data)) > 0:
-                    filtered_data = filtered_data / np.max(np.abs(filtered_data)) * 0.8
-
-                filtered_path = temp_audio_path.replace('.wav', '_filtered.wav')
-                sf.write(filtered_path, filtered_data, samplerate_filt)
-                temp_files_to_clean_up.append(filtered_path)
-
-                with sr.AudioFile(filtered_path) as source:
-                    r_filt = sr.Recognizer()
-                    r_filt.energy_threshold = 150
-                    r_filt.adjust_for_ambient_noise(source, duration=0.1)
-                    audio_data_filt = r_filt.record(source)
-
-                text = r_filt.recognize_google(audio_data_filt, language='en-US')
-                if text and text.strip():
-                    transcription_results.append((text.strip(), 0.6, "Google-filtered"))
-
-            except ImportError:
-                pass
-            except sr.UnknownValueError:
-                pass
-            except Exception as e:
-                pass
-
-        # Select best result
-        if transcription_results:
-            best_result = max(transcription_results, key=lambda x: x[1])
-            return best_result[0]
+        except:
+            pass
 
         return ""
 
@@ -236,7 +173,7 @@ def enhanced_speech_to_text(audio_file_path):
             try:
                 if os.path.exists(path):
                     os.unlink(path)
-            except Exception as e:
+            except:
                 pass
 
 def initialize_session_state():
@@ -306,14 +243,15 @@ if audio_bytes:
 
 if st.session_state.messages[-1]["role"] != "assistant":
     with st.chat_message("assistant"):
-        with st.spinner("Thinking🤔..."):
+        # OPTIMIZATION: Faster spinner messages
+        with st.spinner("Thinking..."):
             final_response = get_answer(st.session_state.messages)
-        with st.spinner("Generating audio response..."):    
+        with st.spinner("Generating audio..."):    
             audio_file = text_to_speech(final_response)
             autoplay_audio(audio_file)
         st.write(final_response)
         st.session_state.messages.append({"role": "assistant", "content": final_response})
-        if os.path.exists(audio_file):
+        if audio_file and os.path.exists(audio_file):
             os.remove(audio_file)
 
 # Float the footer container and provide CSS to target it with
