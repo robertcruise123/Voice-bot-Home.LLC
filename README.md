@@ -1,7 +1,7 @@
 Step by Step guide to use the voice bot :
 📋 What You'll Build
 A conversational AI voice bot that can:
-- Answer questions about Ayush Sarkar (using voice or text)
+- Answer questions about Ayush Sarkar (using voice)
 - Speak responses back to you
 - Work through your web browser
 
@@ -40,8 +40,6 @@ streamlit run main.py
 Your browser will open automatically at `http://localhost:8501`
 
 🎯 How to Use
-Text Chat
-- Type your question and press Enter
 Voice Chat  
 - Click the microphone button at the bottom
 - Speak your question clearly
