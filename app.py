@@ -72,15 +72,14 @@ if audio_bytes:
 # Generate AI response
 if st.session_state.messages[-1]["role"] != "assistant":
     with st.chat_message("assistant"):
-        # OPTIMIZATION: Faster spinner messages
+        # Get the AI response
         with st.spinner("Thinking..."):
             final_response = get_answer(st.session_state.messages)
-        with st.spinner("Generating audio..."):    
-            audio_file = text_to_speech(final_response)
-            autoplay_audio(audio_file)
+        
+        # Display the text response
         st.write(final_response)
         
-        # Generate and play audio response
+        # FIXED: Generate and play audio response ONLY ONCE
         with st.spinner("🔊 Generating audio response..."):    
             audio_file = text_to_speech(final_response)
             if audio_file:
@@ -89,10 +88,9 @@ if st.session_state.messages[-1]["role"] != "assistant":
                 if os.path.exists(audio_file):
                     os.remove(audio_file)
         
+        # Add response to messages
         st.session_state.messages.append({"role": "assistant", "content": final_response})
 
-        if audio_file and os.path.exists(audio_file):
-            os.remove(audio_file)
 # Float the footer container
 footer_container.float("bottom: 0rem;")
 
