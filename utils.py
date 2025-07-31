@@ -13,6 +13,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import concurrent.futures
 import threading
+import time
+import random
+from typing import Optional, List, Dict
 
 # Initialize Together AI client
 try:
@@ -25,7 +28,14 @@ except KeyError:
     st.stop()
 
 client = Together(api_key=TOGETHER_API_KEY)
-DEEPSEEK_MODEL = "deepseek-ai/deepseek-V3"
+
+# Multiple model options with fallback
+MODEL_OPTIONS = [
+    "deepseek-ai/deepseek-V3",
+    "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+    "Qwen/Qwen2.5-72B-Instruct-Turbo"
+]
 
 # Personal Knowledge Base for RAG
 PERSONAL_KNOWLEDGE_BASE = {
@@ -69,50 +79,114 @@ def find_relevant_context(query, top_k=3):
     
     return "\n".join(relevant_chunks)
 
-def get_answer(messages):
-    """Get response from Together AI DeepSeek model with RAG - OPTIMIZED"""
-    try:
-        # Get the latest user message for RAG context
-        latest_message = messages[-1]["content"] if messages else ""
-        relevant_context = find_relevant_context(latest_message)
-        
-        # Create system prompt with RAG context
-        system_prompt = f"""You are Ayush Sarkar, speaking naturally in first person about yourself.
-        
-        Here is your personal information to draw from:
-        {relevant_context}
-        
-        Instructions:
-        - Respond as Ayush naturally and conversationally
-        - Be authentic, professional, and show your personality
-        - Use the provided personal context to give genuine answers
-        - Add appropriate humor where it fits naturally
-        - Keep responses concise but informative (2-4 sentences typically)
-        - Don't use emojis in your response
-        - Avoid repeatedly mentioning your degree or college unless specifically asked about education
-        - Focus on the substance of what you're sharing rather than credentials
-        - If asked about something not in your background, be honest but relate it to your learning mindset
-        - Sound like a real person having a conversation, not giving a resume
-        """
-        
-        # Format messages for the API
-        formatted_messages = [{"role": "system", "content": system_prompt}]
-        formatted_messages.extend(messages)
-        
-        # OPTIMIZATION: Reduced max_tokens and timeout for faster response
-        response = client.chat.completions.create(
-            model=DEEPSEEK_MODEL,
-            messages=formatted_messages,
-            max_tokens=300,  # Reduced from 400
-            temperature=0.7,
-            timeout=20  # Reduced from 30
-        )
-        
-        return response.choices[0].message.content.strip()
-        
-    except Exception as e:
-        st.error(f"Error getting response from Together AI: {e}")
-        return "Sorry, I'm having trouble processing that right now. Could you try asking your question again?"
+def exponential_backoff_retry(func, max_retries=3, base_delay=1):
+    """Retry function with exponential backoff"""
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise e
+            
+            # Calculate delay with jitter
+            delay = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
+            time.sleep(delay)
+            continue
+
+def get_answer_with_model(messages: List[Dict], model: str) -> str:
+    """Get response from specific model"""
+    latest_message = messages[-1]["content"] if messages else ""
+    relevant_context = find_relevant_context(latest_message)
+    
+    system_prompt = f"""You are Ayush Sarkar, speaking naturally in first person about yourself.
+    
+    Here is your personal information to draw from:
+    {relevant_context}
+    
+    Instructions:
+    - Respond as Ayush naturally and conversationally
+    - Be authentic, professional, and show your personality
+    - Use the provided personal context to give genuine answers
+    - Add appropriate humor where it fits naturally
+    - Keep responses concise but informative (2-4 sentences typically)
+    - Don't use emojis in your response
+    - Avoid repeatedly mentioning your degree or college unless specifically asked about education
+    - Focus on the substance of what you're sharing rather than credentials
+    - If asked about something not in your background, be honest but relate it to your learning mindset
+    - Sound like a real person having a conversation, not giving a resume
+    """
+    
+    formatted_messages = [{"role": "system", "content": system_prompt}]
+    formatted_messages.extend(messages)
+    
+    response = client.chat.completions.create(
+        model=model,
+        messages=formatted_messages,
+        max_tokens=300,
+        temperature=0.7,
+        timeout=15
+    )
+    
+    return response.choices[0].message.content.strip()
+
+def get_fallback_response(messages: List[Dict]) -> str:
+    """Generate a fallback response when API is unavailable"""
+    latest_message = messages[-1]["content"].lower() if messages else ""
+    
+    # Simple keyword-based responses
+    if any(word in latest_message for word in ['hello', 'hi', 'hey']):
+        return "Hey there! I'm Ayush. Great to meet you! I'm a recent BCA graduate who's passionate about AI/ML, cooking, and photography. What would you like to know about me?"
+    
+    elif any(word in latest_message for word in ['story', 'background', 'about']):
+        return "I'm Ayush Sarkar, a recent BCA graduate from Sikkim Manipal Institute of Technology. I'm passionate about AI/ML, love cooking and photography, and I'm always determined to make the impossible possible. I've been diving deep into AI/ML for about 2 years now and built some interesting projects along the way."
+    
+    elif any(word in latest_message for word in ['superpower', 'strength', 'skill']):
+        return "My superpower is making something possible by hook or crook! If I don't know something, I'll learn it and use every tool available. I always find ways to solve challenges efficiently - that determination is what drives me."
+    
+    elif any(word in latest_message for word in ['cooking', 'cook', 'food']):
+        return "I love cooking! People are often surprised by this, but they should definitely try my white sauce chicken pasta. It's one of my specialties and I take pride in creating delicious meals."
+    
+    elif any(word in latest_message for word in ['project', 'work', 'college']):
+        return "I've worked on several interesting AI/ML projects during college. One of my biggest challenges was leading a team project where I had to ensure everything was perfect for monthly presentations. I worked late nights to make sure we delivered quality work and it was ultimately successful."
+    
+    elif any(word in latest_message for word in ['hobby', 'interest', 'free time']):
+        return "I have quite a few interests! I love photography and travel - there's something amazing about capturing moments and exploring new places. I also go to the gym regularly to maintain a healthy lifestyle. And of course, there's my passion for AI/ML which keeps me constantly learning."
+    
+    else:
+        return "I'm having some technical difficulties right now, but I'd love to chat with you! Feel free to ask me about my background, projects, hobbies, or anything else you're curious about. I'm Ayush, and I'm always happy to share my story!"
+
+def get_answer(messages: List[Dict]) -> str:
+    """Get response with retry logic and model fallback - ENHANCED ERROR HANDLING"""
+    if not messages:
+        return "Hi! I'm Ayush Sarkar. How may I assist you today?"
+    
+    # Try each model with retry logic
+    for model in MODEL_OPTIONS:
+        try:
+            def api_call():
+                return get_answer_with_model(messages, model)
+            
+            # Try with exponential backoff
+            response = exponential_backoff_retry(api_call, max_retries=2, base_delay=1)
+            return response
+            
+        except Exception as e:
+            error_str = str(e).lower()
+            
+            # Log the error for debugging
+            print(f"Error with model {model}: {e}")
+            
+            # Skip to next model for these errors
+            if any(err in error_str for err in ['503', 'overloaded', 'not ready', 'timeout', '502', '500']):
+                continue
+            
+            # For other errors, try next model but with shorter delay
+            time.sleep(0.5)
+            continue
+    
+    # If all models fail, return fallback response
+    st.warning("⚠️ AI service is temporarily unavailable. Using offline response mode.")
+    return get_fallback_response(messages)
 
 # Cache compiled regex for faster emoji removal
 @st.cache_data
@@ -145,24 +219,32 @@ def remove_emojis(text):
     return emoji_pattern.sub(r'', text).strip()
 
 def text_to_speech(text):
-    """Convert text to speech using gTTS - OPTIMIZED"""
+    """Convert text to speech using gTTS - OPTIMIZED with error handling"""
     try:
-        # Remove emojis from text
         clean_text = remove_emojis(text)
         
         if not clean_text.strip():
             return None
         
-        # OPTIMIZATION: Use faster TTS settings
-        tts = gTTS(text=clean_text, lang='en', slow=False, tld='com')  # Added tld for faster processing
-        
-        # Create temporary file
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-            tts.save(fp.name)
-            return fp.name
+        # Retry logic for TTS
+        for attempt in range(2):
+            try:
+                tts = gTTS(text=clean_text, lang='en', slow=False, tld='com')
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+                    tts.save(fp.name)
+                    return fp.name
+                    
+            except Exception as e:
+                if attempt == 0:
+                    time.sleep(1)
+                    continue
+                else:
+                    print(f"TTS Error: {e}")
+                    return None
             
     except Exception as e:
-        st.error(f"Error generating speech: {e}")
+        print(f"Error generating speech: {e}")
         return None
 
 def autoplay_audio(file_path):
@@ -174,11 +256,10 @@ def autoplay_audio(file_path):
         with open(file_path, "rb") as f:
             data = f.read()
             b64 = base64.b64encode(data).decode()
-            # OPTIMIZATION: Simplified HTML audio tag
             md = f'<audio controls autoplay="true"><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>'
             st.markdown(md, unsafe_allow_html=True)
     except Exception as e:
-        st.error(f"Error playing audio: {e}")
+        print(f"Error playing audio: {e}")
 
 def speech_to_text(audio_file_path):
     """Enhanced speech to text with multiple fallback strategies - OPTIMIZED"""
@@ -207,14 +288,12 @@ def speech_to_text(audio_file_path):
                 data = np.mean(data, axis=1)
 
             # Audio enhancement steps
-            # 1. Remove DC offset
             data = data - np.mean(data)
 
-            # 2. Normalize with headroom
             if np.max(np.abs(data)) > 0:
                 data = data / np.max(np.abs(data)) * 0.9
 
-            # 3. Resample to 16kHz if needed
+            # Resample to 16kHz if needed
             target_sr = 16000
             if samplerate != target_sr:
                 try:
@@ -226,7 +305,7 @@ def speech_to_text(audio_file_path):
                         data = data[::factor]
                         samplerate = samplerate // factor
 
-            # 4. Apply pre-emphasis filter
+            # Apply pre-emphasis filter
             pre_emphasis = 0.97
             data = np.append(data[0], data[1:] - pre_emphasis * data[:-1])
 
@@ -237,18 +316,17 @@ def speech_to_text(audio_file_path):
         except Exception as e:
             processed_path = temp_audio_path
 
-        # Initialize recognizer - OPTIMIZED settings
+        # Initialize recognizer
         r = sr.Recognizer()
         r.energy_threshold = 200
         r.dynamic_energy_threshold = True
-        r.pause_threshold = 0.5  # Reduced from 0.6
-        r.operation_timeout = 10  # Reduced from 15
+        r.pause_threshold = 0.5
+        r.operation_timeout = 10
 
-        # OPTIMIZATION: Try fewer languages for faster processing
-        languages_to_try = ['en-US', 'en-IN']  # Reduced from 5 to 2 most relevant
+        languages_to_try = ['en-US', 'en-IN']
 
         with sr.AudioFile(processed_path) as source:
-            r.adjust_for_ambient_noise(source, duration=0.05)  # Reduced from 0.1
+            r.adjust_for_ambient_noise(source, duration=0.05)
             audio_data = r.record(source)
 
         for lang in languages_to_try:
@@ -261,7 +339,7 @@ def speech_to_text(audio_file_path):
             except sr.RequestError:
                 continue
 
-        # OPTIMIZATION: Only one fallback strategy instead of multiple
+        # Fallback strategy
         try:
             data_amp, samplerate_amp = sf.read(temp_audio_path)
             if len(data_amp.shape) > 1:
